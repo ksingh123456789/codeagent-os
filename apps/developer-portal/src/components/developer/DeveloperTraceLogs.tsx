@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import { usePlatform } from '../../context/PlatformContext';
 import { ExecutionRun } from '../../types/platform';
@@ -15,13 +15,20 @@ export const DeveloperTraceLogs: React.FC = () => {
     triggerAgentRun,
     setDeveloperPage,
     executionMetrics,
+    fetchExecutionMetrics,
+    resumeAgentExecution,
     setSelectedTicketKey
   } = usePlatform();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [timeFilter, setTimeFilter] = useState<'today' | '7days' | 'custom'>('today');
+  const [timeFilter, setTimeFilter] = useState<'today' | '7days' | 'custom' | 'all'>('today');
   const [reviewNoteToast, setReviewNoteToast] = useState(false);
+
+  useEffect(() => {
+    fetchExecutionHistory(1, timeFilter);
+    fetchExecutionMetrics(timeFilter);
+  }, [timeFilter]);
 
   const selectedRun: ExecutionRun =
     executionRuns.find((r) => r.id === selectedHistoryRunId) || executionRuns[0];
@@ -40,9 +47,18 @@ export const DeveloperTraceLogs: React.FC = () => {
     alert(`Pull Request for ${selectedRun.ticketKey} approved and merged into main branch!`);
   };
 
-  const handleAddNote = () => {
-    setReviewNoteToast(true);
-    setTimeout(() => setReviewNoteToast(false), 2500);
+  const handleRerun = async () => {
+    const feedback = window.prompt("Enter feedback or instructions for the agent to revise the PR:");
+    if (!feedback) return;
+    
+    const toastId = toast.loading("Resuming agent execution...");
+    try {
+      await resumeAgentExecution(selectedRun.ticketKey, feedback);
+      toast.success("Agent execution resumed successfully!", { id: toastId });
+      fetchExecutionHistory(1, timeFilter);
+    } catch (e) {
+      toast.error("Failed to resume agent execution.", { id: toastId });
+    }
   };
 
   const openRunDiff = (run: ExecutionRun) => {
@@ -98,12 +114,7 @@ export const DeveloperTraceLogs: React.FC = () => {
         </div>
       </div>
 
-      {reviewNoteToast && (
-        <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-lg flex items-center gap-2 font-mono">
-          <span className="material-symbols-outlined text-emerald-600 text-[16px]">check_circle</span>
-          <span>Review note attached to Jira ticket {selectedRun.ticketKey} and GitHub commit {selectedRun.commitHash}.</span>
-        </div>
-      )}
+
 
       {/* Summary Stats Bar (4 Metric Cards) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -174,17 +185,7 @@ export const DeveloperTraceLogs: React.FC = () => {
         </div>
       </div>
 
-      {executionRuns.length === 0 || !selectedRun ? (
-        <div className="flex-1 flex flex-col items-center justify-center text-center p-6 sm:p-8 bg-[#f8f9ff] border border-[#c7c4d8]/60 rounded-xl shadow-sm mt-2 sm:mt-4 min-h-[280px] sm:min-h-[400px]">
-          <div className="w-16 h-16 rounded-full bg-[#eff4ff] flex items-center justify-center text-[#3525cd] mb-4">
-            <span className="material-symbols-outlined text-[32px]">history</span>
-          </div>
-          <h2 className="text-xl font-bold text-[#0b1c30]">No Execution History Yet</h2>
-          <p className="text-sm text-[#565e74] mt-2">Run an AI agent on a ticket to generate execution logs.</p>
-        </div>
-      ) : (
-        <>
-          {/* Filter Toolbar */}
+      {/* Filter Toolbar */}
           <div className="p-3 bg-white border border-[#c7c4d8]/60 rounded-xl shadow-sm flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0 sm:min-w-[280px]">
           <div className="relative w-full sm:w-auto sm:flex-1 sm:min-w-[200px] sm:max-w-sm">
@@ -258,8 +259,17 @@ export const DeveloperTraceLogs: React.FC = () => {
 
       {/* Execution Runs - stacked cards on phones */}
       <div className="md:hidden flex flex-col gap-2.5">
-        {filteredRuns.map((run) => {
-          const isSelected = selectedRun.id === run.id;
+        {filteredRuns.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 sm:p-8 bg-[#f8f9ff] border border-[#c7c4d8]/60 rounded-xl shadow-sm min-h-[280px]">
+            <div className="w-16 h-16 rounded-full bg-[#eff4ff] flex items-center justify-center text-[#3525cd] mb-4">
+              <span className="material-symbols-outlined text-[32px]">history</span>
+            </div>
+            <h2 className="text-xl font-bold text-[#0b1c30]">No Execution History Yet</h2>
+            <p className="text-sm text-[#565e74] mt-2">Run an AI agent on a ticket to generate execution logs.</p>
+          </div>
+        ) : (
+          filteredRuns.map((run) => {
+            const isSelected = selectedRun && selectedRun.id === run.id;
           return (
             <article
               key={run.id}
@@ -320,10 +330,11 @@ export const DeveloperTraceLogs: React.FC = () => {
               </div>
             </article>
           );
-        })}
-        {hasMoreExecutions && (
+        })
+        )}
+        {hasMoreExecutions && filteredRuns.length > 0 && (
           <button
-            onClick={() => fetchExecutionHistory(executionPage + 1)}
+            onClick={() => fetchExecutionHistory(executionPage + 1, timeFilter)}
             className="w-full h-10 rounded-lg bg-white border border-[#3525cd] text-[#3525cd] hover:bg-[#eff4ff] font-mono text-[11px] font-semibold transition-colors shadow-sm"
           >
             Load More Executions
@@ -347,8 +358,21 @@ export const DeveloperTraceLogs: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#c7c4d8]/30 text-xs font-mono">
-              {filteredRuns.map((run) => {
-                const isSelected = selectedRun.id === run.id;
+              {filteredRuns.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center bg-[#f8f9ff]">
+                    <div className="flex flex-col items-center justify-center min-h-[200px]">
+                      <div className="w-16 h-16 rounded-full bg-[#eff4ff] flex items-center justify-center text-[#3525cd] mb-4">
+                        <span className="material-symbols-outlined text-[32px]">history</span>
+                      </div>
+                      <h2 className="text-xl font-bold text-[#0b1c30]">No Execution History Yet</h2>
+                      <p className="text-sm text-[#565e74] mt-2">Run an AI agent on a ticket to generate execution logs.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredRuns.map((run) => {
+                  const isSelected = selectedRun && selectedRun.id === run.id;
                 return (
                   <tr
                     key={run.id}
@@ -442,13 +466,14 @@ export const DeveloperTraceLogs: React.FC = () => {
                     </td>
                   </tr>
                 );
-              })}
+              })
+              )}
             </tbody>
           </table>
-          {hasMoreExecutions && (
+          {hasMoreExecutions && filteredRuns.length > 0 && (
             <div className="flex justify-center p-4 border-t border-[#c7c4d8]/60 bg-[#f8f9ff]">
               <button
-                onClick={() => fetchExecutionHistory(executionPage + 1)}
+                onClick={() => fetchExecutionHistory(executionPage + 1, timeFilter)}
                 className="px-4 py-2 rounded-lg bg-white border border-[#3525cd] text-[#3525cd] hover:bg-[#eff4ff] font-mono text-[11px] font-semibold transition-colors shadow-sm"
               >
                 Load More Executions
@@ -459,7 +484,8 @@ export const DeveloperTraceLogs: React.FC = () => {
       </div>
 
       {/* Lower Inspection Drawer / Trace Summary (Selected Run) */}
-      <section id="trace-drawer" className="rounded-xl border border-[#c7c4d8]/80 bg-white shadow-sm overflow-hidden flex flex-col">
+      {selectedRun && filteredRuns.length > 0 && (
+        <section id="trace-drawer" className="rounded-xl border border-[#c7c4d8]/80 bg-white shadow-sm overflow-hidden flex flex-col">
         {/* Inspection Drawer Header */}
         <div className="px-4 sm:px-6 py-3 bg-[#eff4ff] border-b border-[#c7c4d8]/60 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3 min-w-0">
@@ -585,11 +611,11 @@ export const DeveloperTraceLogs: React.FC = () => {
             {/* Actions */}
             <div className="mt-auto pt-2 flex flex-col sm:flex-row lg:flex-col xl:flex-row items-stretch justify-between gap-2">
               <button
-                onClick={handleAddNote}
+                onClick={handleRerun}
                 className="flex-1 py-2 sm:py-1.5 px-3 rounded-lg border border-[#c7c4d8] bg-white text-[#0b1c30] hover:bg-[#eff4ff] text-xs font-mono font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[16px]">chat_bubble_outline</span>
-                <span>Add Review Note</span>
+                <span className="material-symbols-outlined text-[16px]">replay</span>
+                <span>Request Revisions</span>
               </button>
               <button
                 onClick={handleApprove}
@@ -600,9 +626,8 @@ export const DeveloperTraceLogs: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      </section>
-        </>
+          </div>
+        </section>
       )}
     </div>
   );

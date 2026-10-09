@@ -5,7 +5,7 @@ import redis.asyncio as aioredis
 import json
 import uuid
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -171,13 +171,28 @@ async def resume_agent(
 async def get_execution_history(
     page: int = 1,
     limit: int = 50,
+    time_filter: str = "all",
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     if not current_user.company_id:
         return {"data": [], "meta": {"currentPage": page, "totalPages": 0, "totalRecords": 0, "hasMore": False}}
         
-    count_result = await db.execute(select(func.count(Execution.id)).where(Execution.user_id == current_user.id))
+    now = datetime.utcnow()
+    if time_filter == "7days":
+        start_date = now - timedelta(days=7)
+    elif time_filter == "custom":
+        start_date = now - timedelta(days=30)
+    elif time_filter == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_date = datetime.min
+        
+    count_result = await db.execute(
+        select(func.count(Execution.id))
+        .where(Execution.user_id == current_user.id)
+        .where(Execution.created_at >= start_date)
+    )
     total_records = count_result.scalar() or 0
     
     offset = (page - 1) * limit
@@ -185,6 +200,7 @@ async def get_execution_history(
         select(Execution, User.email)
         .outerjoin(User, Execution.user_id == User.id)
         .where(Execution.user_id == current_user.id)
+        .where(Execution.created_at >= start_date)
         .order_by(Execution.created_at.desc())
         .offset(offset).limit(limit)
     )
@@ -321,6 +337,7 @@ async def get_execution_history(
 
 @router.get("/executions/metrics")
 async def get_execution_metrics(
+    time_filter: str = "all",
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -332,21 +349,29 @@ async def get_execution_metrics(
             "tokensConsumed": 0
         }
         
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.utcnow()
+    if time_filter == "7days":
+        start_date = now - timedelta(days=7)
+    elif time_filter == "custom":
+        start_date = now - timedelta(days=30)
+    elif time_filter == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start_date = datetime.min
     
-    # 1. Total runs today
+    # 1. Total runs
     total_result = await db.execute(
         select(func.count(Execution.id))
         .where(Execution.user_id == current_user.id)
-        .where(Execution.created_at >= today_start)
+        .where(Execution.created_at >= start_date)
     )
     total_runs = total_result.scalar() or 0
     
-    # 2. Completed runs today
+    # 2. Completed runs
     completed_result = await db.execute(
         select(func.count(Execution.id))
         .where(Execution.user_id == current_user.id)
-        .where(Execution.created_at >= today_start)
+        .where(Execution.created_at >= start_date)
         .where(Execution.status == "COMPLETED")
     )
     completed_runs = completed_result.scalar() or 0
@@ -357,7 +382,7 @@ async def get_execution_metrics(
     avg_runtime_result = await db.execute(
         select(Execution.started_at, Execution.completed_at)
         .where(Execution.user_id == current_user.id)
-        .where(Execution.created_at >= today_start)
+        .where(Execution.created_at >= start_date)
         .where(Execution.status == "COMPLETED")
         .where(Execution.started_at.is_not(None))
         .where(Execution.completed_at.is_not(None))
@@ -372,7 +397,7 @@ async def get_execution_metrics(
     token_result = await db.execute(
         select(func.sum(Execution.token_usage))
         .where(Execution.user_id == current_user.id)
-        .where(Execution.created_at >= today_start)
+        .where(Execution.created_at >= start_date)
     )
     tokens_consumed = token_result.scalar() or 0
     

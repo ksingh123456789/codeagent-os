@@ -15,6 +15,7 @@ export const DeveloperWorkbench: React.FC = () => {
     pendingApproval,
     triggerAgentRun,
     resumeAgentRun,
+    resumeAgentExecution,
     cancelAgentRun,
     approvePullRequest,
     setDeveloperPage,
@@ -48,6 +49,19 @@ export const DeveloperWorkbench: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [githubRepos, setGithubRepos] = useState<any[]>([]);
   const [ticketRepoSelections, setTicketRepoSelections] = useState<Record<string, string>>({});
+
+  const handleRequestRevisions = async (ticketKey: string) => {
+    const feedback = window.prompt("Enter feedback or instructions for the agent to revise the PR:");
+    if (!feedback) return;
+    
+    const toastId = toast.loading("Resuming agent execution...");
+    try {
+      await resumeAgentExecution(ticketKey, feedback);
+      toast.success("Agent execution resumed successfully!", { id: toastId });
+    } catch (e) {
+      toast.error("Failed to resume agent execution.", { id: toastId });
+    }
+  };
   const [repoBranchesCache, setRepoBranchesCache] = useState<Record<string, any[]>>({});
 
   const handleRepoChange = async (ticketKey: string, repoFullName: string) => {
@@ -589,6 +603,17 @@ export const DeveloperWorkbench: React.FC = () => {
                   <span className="hidden sm:inline">View Execution Report</span>
                 <span className="sm:hidden">Report</span>
                 </button>
+
+                {(selectedTicket.status === 'PR Ready') && (
+                  <button
+                    onClick={() => handleRequestRevisions(selectedTicket.key)}
+                    className="h-8 px-3 rounded-lg bg-white border border-[#c7c4d8] hover:bg-[#eff4ff] text-[#0b1c30] text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-[#3525cd]">replay</span>
+                    <span className="hidden sm:inline">Request Revisions</span>
+                    <span className="sm:hidden">Revisions</span>
+                  </button>
+                )}
 
                 {(selectedTicket.status === 'PR Ready') && (
                   <button

@@ -768,13 +768,13 @@ interface PlatformContextType {
   executionRuns: ExecutionRun[];
   executionPage: number;
   hasMoreExecutions: boolean;
-  fetchExecutionHistory: (page: number) => Promise<void>;
+  fetchExecutionHistory: (page: number, timeFilter?: string) => Promise<void>;
   licensePlans: LicensePlan[];
   platformUsers: PlatformUser[];
   webhookLogs: WebhookLog[];
 
   executionMetrics: any;
-  fetchExecutionMetrics: () => Promise<void>;
+  fetchExecutionMetrics: (timeFilter?: string) => Promise<void>;
 
   // LangGraph Runner state for active workbench ticket
   agentRunningTicketKey: string | null;
@@ -796,6 +796,7 @@ interface PlatformContextType {
   addProjectMapping: (proj: Omit<ProjectMapping, 'id' | 'status' | 'openTicketsCount' | 'assignedDevCount'>) => void;
   triggerAgentRun: (ticketKey: string, baseBranch?: string, targetRepo?: string, req?: string, title?: string, type?: string) => void;
   resumeAgentRun: (decision: string, feedback?: string) => void;
+  resumeAgentExecution: (ticketKey: string, feedback: string) => Promise<void>;
   cancelAgentRun: () => void;
   approvePullRequest: (ticketKey: string) => void;
   resetDemoState: () => void;
@@ -875,10 +876,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     tokensConsumed: 0
   });
 
-  const fetchExecutionMetrics = async () => {
+  const fetchExecutionMetrics = async (timeFilter: string = 'all') => {
     if (!localStorage.getItem('access_token')) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/developer/executions/metrics`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/developer/executions/metrics?time_filter=${timeFilter}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       });
       const data = await res.json();
@@ -888,10 +889,10 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const fetchExecutionHistory = async (page: number) => {
+  const fetchExecutionHistory = async (page: number, timeFilter: string = 'all') => {
     if (!localStorage.getItem('access_token')) return;
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/developer/executions/history?page=${page}&limit=50`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/developer/executions/history?page=${page}&limit=50&time_filter=${timeFilter}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       });
       const json = await res.json();
@@ -1410,6 +1411,25 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const resumeAgentExecution = async (ticketKey: string, feedback: string) => {
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/developer/executions/${ticketKey}/resume`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: JSON.stringify({ 
+          decision: 'REVISE', 
+          feedback
+        })
+      });
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+  };
+
   const cancelAgentRun = () => {
     setIsStreaming(false);
     setAgentLogs(prev => [
@@ -1548,6 +1568,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addProjectMapping,
         triggerAgentRun,
         resumeAgentRun,
+        resumeAgentExecution,
         cancelAgentRun,
         approvePullRequest,
         resetDemoState,
