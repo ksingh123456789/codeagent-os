@@ -1,0 +1,6 @@
+{
+  "name": "CodeAgent OS - Multi-Tenant AI Coding Infrastructure",
+  "description": "Unified platform synchronizing Developer Workbench, Tenant Admin Console, and Super Admin Management with autonomous LangGraph agent workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
